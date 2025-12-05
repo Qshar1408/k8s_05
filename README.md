@@ -59,6 +59,59 @@
   - описание пода с контейнерами (`kubectl describe pods data-exchange`)
   - вывод команды чтения файла (`tail -f <имя общего файла>`)
 
+
+### Решение:
+
+1. Создал новый namespace:
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_001.png)
+
+2. Создал деплоймент:
+
+```bash
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netology-app-multitool-busybox
+  namespace: newkube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: main
+  template:
+    metadata:
+      labels:
+        app: main
+    spec:
+      containers:
+      - name: busybox
+        image: busybox
+        command: ['sh', '-c', 'while true; do echo "current date = $(date)" >> /busybox_dir/date.log; sleep 5; done']
+        volumeMounts:
+          - mountPath: "/busybox_dir"
+            name: deployment-volume
+      - name: multitool
+        image: wbitt/network-multitool
+        volumeMounts:
+          - name: deployment-volume
+            mountPath: "/multitool_dir"
+      volumes:
+        - name: deployment-volume
+          emptyDir: {}
+```
+
+3. Запускаю манифест, захожу в под, и проверяю доступность файлов:
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_002.png)
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_003.png)
+
+4. Далее, нужной папке нахожу файл, созданный в контейнере Busybox. Он доступен для чтения контейнером multitool в котором хранятся логи:
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_004.png)
+
+
 ------
 
 ## Задание 2. PV, PVC
@@ -81,6 +134,120 @@
 - Описания:
   - объяснение наблюдаемого поведения ресурсов в двух последних шагах.
 
+
+### Решение:
+
+1. Создал манифест pv-pvc.yaml
+
+```bash
+# pv-pvc.yaml
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-pv
+spec:
+  capacity:
+    storage: 1Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  hostPath:
+    path: "/mnt/k8s-data" 
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-pvc
+spec:
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: manual 
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-exchange-pvc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-exchange-pvc
+  template:
+    metadata:
+      labels:
+        app: data-exchange-pvc
+    spec:
+      containers:
+      - name: writer
+        image: busybox
+        command: ["/bin/sh", "-c"]
+        args: ["while true; do echo $(date) >> /pvc-data/data.txt; sleep 5; done"]
+        volumeMounts:
+        - name: persistent-storage
+          mountPath: /pvc-data
+      - name: reader
+        image: wbitt/network-multitool
+        command: ["/bin/sh", "-c"]
+        args: ["tail -f /pvc-data/data.txt"]
+        volumeMounts:
+        - name: persistent-storage
+          mountPath: /pvc-data
+      volumes:
+      - name: persistent-storage
+        persistentVolumeClaim:
+          claimName: local-pvc
+```
+
+2. Провёл проверку создания PV и PVC (Status: Bound). Так же провёл проверку самого пода:
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_005.png)
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_006.png)
+
+3. Состояние PV после удаления PVC (Status: Released):
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_007.png)
+
+4. Содержимое файла на ноде после удаления PVC:
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_008.png)
+
+5. Содержимое файла на ноде после удаления PV:
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_009.png)
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_010.png)
+
+
+
+#### Ответы на вопросы:
+1. Почему PV перешел в статус Released, а не удалился?
+
+     Persistent Volume (PV) оказался в состоянии Released из-за политики возврата Retain, которая была для него назначена. Суть этой политики в том, чтобы предотвратить автоматическое удаление тома, и самого PV в Kubernetes после того, как связанный с ним Persistent Volume Claim (PVC) будет удалён. Вместо удаления PV переходит в «заблокированное» состояние (Released), в котором он продолжает хранить метаданные о ранее существовавшей привязке к конкретному PVC. Для того чтобы использовать этот том снова, администратору необходимо вручную вмешаться и очистить или переконфигурировать ресурс.
+     В противоположность этому, если бы была активна политика Delete, то вместе с PVC были бы автоматически и безвозвратно удалены как сам PV, так и все данные, хранящиеся в связанном с ним томе хранения.
+
+2. Почему файл остался на диске после удаления и PVC, и PV?
+
+Файл сохранился на диске по двум ключевым причинам:
+    1. Использовался тип тома hostPath:
+      ** Этот тип тома непосредственно подключает каталог с локального диска ноды (сервера) внутрь Pod'а.
+      ** Kubernetes не контролирует и не отвечает за фактическое содержимое этого каталога на хосте.
+      ** Операция удаления объектов PV и PVC аннулирует только их «виртуальные привязки» (объекты в кластере Kubernetes), но не затрагивает реальные файлы, оставшиеся на узловой машине.
+
+    2. Была применена политика Retain:
+      ** Даже для автоматически управляемых томов (например, облачных дисков AWS EBS или Google PD) политика Retain специально предотвращает стирание данных.
+      ** Это позволяет администратору вручную проверить, экспортировать или создать резервную копию данных перед окончательной очисткой.
+
+Общий вывод: Удаление PVC и PV приводит лишь к исчезновению соответствующих записей из системы Kubernetes, в то время как сами данные на дисковом накопителе продолжают существовать.
+
+В рассматриваемом сценарии данные по-прежнему находятся по пути /mnt/k8s-data/data.txt, что и подтверждается результатом выполнения команды:
 ------
 
 ## Задание 3. StorageClass
