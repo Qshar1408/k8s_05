@@ -271,6 +271,17 @@ Persistent Volume (PV) оказался в состоянии Released из-за
   - `sc.yaml`
 - Скриншоты:
   - каждый шаг выполнения задания, начиная с шага 2
+ 
+### Решение:
+
+1. Создал манифест sc.yaml
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_011.png)
+
+2. Проверка создания StorageClass, привязки PV и PVC и работы пода с StorageClass (логи reader):
+
+![k8s_05](https://github.com/Qshar1408/k8s_05/blob/main/img/k8s_05_012.png)
+
 ---
 ## Шаблоны манифестов с учебными комментариями
 ### 1. Deployment (containers-data-exchange.yaml)
